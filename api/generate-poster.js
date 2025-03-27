@@ -1,8 +1,8 @@
 import { createClient } from '@supabase/supabase-js';
 import { GoogleGenerativeAI, HarmCategory, HarmBlockThreshold } from '@google/generative-ai';
 
-// 初始化Supabase客户端
-const supabaseUrl = process.env.VITE_SUPABASE_URL;
+// 初始化Supabase客户端 - 修正环境变量访问方式
+const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
@@ -15,12 +15,32 @@ const modelName = process.env.LLM_MODEL || 'gemini-2.0-flash-exp';
  * 生成产品海报的Serverless函数
  */
 export default async function handler(req, res) {
+  // 设置CORS头
+  res.setHeader('Access-Control-Allow-Credentials', true);
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
+  res.setHeader(
+    'Access-Control-Allow-Headers',
+    'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version'
+  );
+  
+  // 处理预检请求
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+  
   // 只允许POST请求
   if (req.method !== 'POST') {
     return res.status(405).json({ error: '方法不允许' });
   }
 
   try {
+    // 验证环境变量
+    if (!supabaseUrl || !supabaseServiceKey || !geminiApiKey) {
+      console.error('缺少必要的环境变量');
+      return res.status(500).json({ error: '服务器配置错误 - 缺少环境变量' });
+    }
+
     const {
       productName,
       productFeatures,
@@ -138,10 +158,16 @@ ${sceneDescription ? `场景描述: ${sceneDescription}` : ''}
  */
 async function generatePosterWithGemini(prompt, imageUrl) {
   try {
+    // 添加超时处理
+    const timeoutPromise = new Promise((_, reject) => 
+      setTimeout(() => reject(new Error('获取图片请求超时')), 30000)
+    );
+    
     // 获取图片作为二进制数据
     let imageData;
     try {
-      const imageResponse = await fetch(imageUrl);
+      const imageResponsePromise = fetch(imageUrl);
+      const imageResponse = await Promise.race([imageResponsePromise, timeoutPromise]);
       const imageBuffer = await imageResponse.arrayBuffer();
       imageData = Buffer.from(imageBuffer);
     } catch (imageError) {
@@ -158,35 +184,57 @@ async function generatePosterWithGemini(prompt, imageUrl) {
       mimeType: "image/jpeg" // 假设是JPEG，可能需要根据实际情况调整
     };
 
-    // 准备请求
-    const result = await model.generateContent({
-      contents: [
-        {
-          role: "user",
-          parts: [
-            { text: prompt },
-            { inlineData: imageFileObject }
+    // 添加API请求重试逻辑
+    const MAX_RETRIES = 2;
+    let retries = 0;
+    let result;
+    
+    while (retries <= MAX_RETRIES) {
+      try {
+        // 准备请求
+        result = await model.generateContent({
+          contents: [
+            {
+              role: "user",
+              parts: [
+                { text: prompt },
+                { inlineData: imageFileObject }
+              ]
+            }
+          ],
+          generationConfig: {
+            temperature: 0.4,
+            topK: 32,
+            topP: 1,
+            maxOutputTokens: 2048,
+            responseModalities: ["TEXT", "IMAGE"]
+          },
+          safetySettings: [
+            {
+              category: HarmCategory.HARM_CATEGORY_HARASSMENT,
+              threshold: HarmBlockThreshold.BLOCK_NONE
+            },
+            {
+              category: HarmCategory.HARM_CATEGORY_HATE_SPEECH,
+              threshold: HarmBlockThreshold.BLOCK_NONE
+            }
           ]
+        });
+        
+        // 如果请求成功，跳出重试循环
+        break;
+      } catch (apiError) {
+        retries++;
+        console.error(`API调用失败 (尝试 ${retries}/${MAX_RETRIES}):`, apiError);
+        
+        if (retries > MAX_RETRIES) {
+          throw new Error('Gemini API多次调用失败: ' + apiError.message);
         }
-      ],
-      generationConfig: {
-        temperature: 0.4,
-        topK: 32,
-        topP: 1,
-        maxOutputTokens: 2048,
-        responseModalities: ["TEXT", "IMAGE"]
-      },
-      safetySettings: [
-        {
-          category: HarmCategory.HARM_CATEGORY_HARASSMENT,
-          threshold: HarmBlockThreshold.BLOCK_NONE
-        },
-        {
-          category: HarmCategory.HARM_CATEGORY_HATE_SPEECH,
-          threshold: HarmBlockThreshold.BLOCK_NONE
-        }
-      ]
-    });
+        
+        // 等待一段时间后重试
+        await new Promise(resolve => setTimeout(resolve, 1000 * retries));
+      }
+    }
 
     const response = await result.response;
     console.log("Gemini API响应:", response);

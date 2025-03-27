@@ -1,7 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 
-// 初始化Supabase客户端（使用服务角色密钥）
-const supabaseUrl = process.env.VITE_SUPABASE_URL;
+// 初始化Supabase客户端（使用服务角色密钥）- 修正环境变量访问方式
+const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
@@ -11,12 +11,32 @@ const supabase = createClient(supabaseUrl, supabaseServiceKey);
  * @param {Object} res - 响应对象
  */
 export default async function handler(req, res) {
+  // 设置CORS头
+  res.setHeader('Access-Control-Allow-Credentials', true);
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
+  res.setHeader(
+    'Access-Control-Allow-Headers',
+    'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version'
+  );
+  
+  // 处理预检请求
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+  
   // 只允许DELETE请求
   if (req.method !== 'DELETE') {
     return res.status(405).json({ error: '方法不允许' });
   }
 
   try {
+    // 验证环境变量
+    if (!supabaseUrl || !supabaseServiceKey) {
+      console.error('缺少必要的环境变量');
+      return res.status(500).json({ error: '服务器配置错误 - 缺少环境变量' });
+    }
+    
     const { id } = req.query;
 
     if (!id) {
