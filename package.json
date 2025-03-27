@@ -1,0 +1,32 @@
+{
+  "name": "led-poster-generator",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --force",
+    "build": "vite build",
+    "preview": "vite preview",
+    "api": "node server.js",
+    "dev:api": "concurrently \"npm run api\" \"npm run dev\""
+  },
+  "dependencies": {
+    "@element-plus/icons-vue": "^2.3.1",
+    "@google/generative-ai": "^0.2.1",
+    "@supabase/supabase-js": "^2.39.0",
+    "body-parser": "^1.20.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "element-plus": "^2.4.3",
+    "express": "^4.21.2",
+    "uuid": "^9.0.1",
+    "vue": "^3.3.8",
+    "vue-router": "^4.2.5"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^4.5.0",
+    "concurrently": "^8.2.2",
+    "sass": "^1.69.5",
+    "vite": "^5.0.0"
+  }
+}
